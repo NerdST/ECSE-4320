@@ -1,0 +1,73 @@
+```
+#!/bin/bash
+# Project 2: Cache & Memory Performance Profiling - MLC Commands
+
+# -------------------------------
+# 1️⃣ Zero-Queue Latency (per-level)
+# -------------------------------
+# Single-thread, isolated measurements of L1/L2/L3/DRAM
+sudo ./mlc --idle_latency -X -v
+
+# Cross-socket/NUMA latency matrix
+sudo ./mlc --latency_matrix -X -v
+
+# Optional: save output to file
+sudo ./mlc --idle_latency -X -v > zero_queue_latency.txt
+sudo ./mlc --latency_matrix -X -v > latency_matrix.txt
+
+# -------------------------------
+# 2️⃣ Pattern & Granularity Sweep
+# -------------------------------
+# Sequential strides
+sudo ./mlc --bandwidth_matrix -l64 -X -v > bw_seq_64B.txt
+sudo ./mlc --bandwidth_matrix -l256 -X -v > bw_seq_256B.txt
+sudo ./mlc --bandwidth_matrix -l1024 -X -v > bw_seq_1024B.txt
+
+# Random strides
+sudo ./mlc --bandwidth_matrix -r -l64 -X -v > bw_rand_64B.txt
+sudo ./mlc --bandwidth_matrix -r -l256 -X -v > bw_rand_256B.txt
+sudo ./mlc --bandwidth_matrix -r -l1024 -X -v > bw_rand_1024B.txt
+
+# -------------------------------
+# 3️⃣ Read/Write Mix Sweep
+# -------------------------------
+# 100% Read
+sudo ./mlc --bandwidth_matrix -R -l64 -X -v > bw_100R.txt
+
+# 100% Write
+sudo ./mlc --bandwidth_matrix -W6 -l64 -X -v > bw_100W.txt
+
+# 70% Read / 30% Write
+sudo ./mlc --bandwidth_matrix -W2 -l64 -X -v > bw_70R_30W.txt
+
+# 50% Read / 50% Write
+sudo ./mlc --bandwidth_matrix -W5 -l64 -X -v > bw_50R_50W.txt
+
+# -------------------------------
+# 4️⃣ Intensity / Loaded-Latency Sweep
+# -------------------------------
+# Single-thread
+sudo ./mlc --loaded_latency -X -v > loaded_latency_1thread.txt
+
+# Moderate intensity (4 threads)
+sudo ./mlc --loaded_latency -X -t4 -v > loaded_latency_4threads.txt
+
+# High intensity (8 threads)
+sudo ./mlc --loaded_latency -X -t8 -v > loaded_latency_8threads.txt
+
+# -------------------------------
+# 5️⃣ Working Set / Locality Sweep
+# -------------------------------
+# Default buffer (~100MB)
+sudo ./mlc --latency_matrix -X -v > ws_default.txt
+
+# Larger buffers to exceed L1/L2/L3 and hit DRAM
+sudo ./mlc --latency_matrix -X -b200000 -v > ws_200MB.txt
+sudo ./mlc --latency_matrix -X -b400000 -v > ws_400MB.txt
+sudo ./mlc --latency_matrix -X -b800000 -v > ws_800MB.txt
+
+# Optional: random access to reduce prefetcher effect
+sudo ./mlc --latency_matrix -r -X -b200000 -v > ws_200MB_rand.txt
+sudo ./mlc --latency_matrix -r -X -b400000 -v > ws_400MB_rand.txt
+sudo ./mlc --latency_matrix -r -X -b800000 -v > ws_800MB_rand.txt
+```

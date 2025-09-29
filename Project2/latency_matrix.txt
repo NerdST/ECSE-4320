@@ -1,0 +1,57 @@
+Intel(R) Memory Latency Checker - v3.11b
+OS id:   0 Core id:   0 Socket id:   0 Hyperthread id:   0
+OS id:   1 Core id:   1 Socket id:   0 Hyperthread id:   0
+OS id:   2 Core id:   2 Socket id:   0 Hyperthread id:   0
+OS id:   3 Core id:   3 Socket id:   0 Hyperthread id:   0
+OS id:   4 Core id:   0 Socket id:   0 Hyperthread id:   1
+OS id:   5 Core id:   1 Socket id:   0 Hyperthread id:   1
+OS id:   6 Core id:   2 Socket id:   0 Hyperthread id:   1
+OS id:   7 Core id:   3 Socket id:   0 Hyperthread id:   1
+Detected 1 sockets
+Command line parameters: --latency_matrix -X -v 
+parse_numanodes(): num numa nodes = 1
+Number of groups in cpumap file in nodeid 0=1
+parse_numanodes() completed - 1 nodes present
+total_cpus_in_numanode(): total cpus in node 0 = 8
+Detected 1 numa nodes
+num numa nodes=1....
+numa[numa_node][offset]=logical_cpu_id
+numa[0][0]=0
+numa[0][1]=1
+numa[0][2]=2
+numa[0][3]=3
+numa[0][4]=4
+numa[0][5]=5
+numa[0][6]=6
+numa[0][7]=7
+1TPC num numa nodes=1....
+numa[0][0]=0
+numa[0][1]=1
+numa[0][2]=2
+numa[0][3]=3
+NODE RESERVED....
+numa_reserved[0][4]=0, 1
+OS id:   0 Core id:   0 Socket id:   0 Hyperthread id:   0 numa:   0
+OS id:   1 Core id:   1 Socket id:   0 Hyperthread id:   0 numa:   0
+OS id:   2 Core id:   2 Socket id:   0 Hyperthread id:   0 numa:   0
+OS id:   3 Core id:   3 Socket id:   0 Hyperthread id:   0 numa:   0
+OS id:   4 Core id:   0 Socket id:   0 Hyperthread id:   1 numa:   0
+OS id:   5 Core id:   1 Socket id:   0 Hyperthread id:   1 numa:   0
+OS id:   6 Core id:   2 Socket id:   0 Hyperthread id:   1 numa:   0
+OS id:   7 Core id:   3 Socket id:   0 Hyperthread id:   1 numa:   0
+
+Using buffer size of 200.000MiB
+Test running on 1896.00 MHZ processor(s)
+Measuring idle latencies for sequential access (in ns)...
+
+Numa node  0 (core   1) measuring latency to memory on numa node  0 ..
+Free memory on node 0 = 1680064
+AllocAndInitMemoryForLatencyThread: buf_len 209715200,NUMA_NODE 2 nodeId 0 
+GrabMemoryFromNumaNode(): Allocate 209715712 bytes from numa node0
+Allocated 3276800 cache lines...
+memory initialized 1
+memory initialized 2
+Start loop for latency measurement...
+Running one iteration...for 3276800 cache lines
+Each iteration took 251.2 base frequency clocks (	132.5	ns)
+
