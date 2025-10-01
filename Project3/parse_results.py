@@ -1,14 +1,45 @@
-# ECSE-4320 Project 3 Lab Report
+import re
+def parse_fio_output(fio_output):
+    results = {}
+    current_test = None
 
-## Introduction
-Before I started doing anything too risky, I created a new partition
-on my NVMe drive with nothing in it. I then created a new filesystem
-on that partition and mounted it to `/mnt/nvme0n1p7`. This way, I could run tests on the NVMe drive without affecting my main system.
+    for line in fio_output.splitlines():
+        match_rand = re.match(r'^\d+k_rand(read|write)_iops:', line)
+        if match_rand:
+            op_type = match_rand.group(1)
+            current_test = 'rand' + op_type
+            results[current_test] = {}
+        else:
+            match_seq = re.match(r'^\d+m_seq(read|write)_throughput:', line)
+            if match_seq:
+                op_type = match_seq.group(1)
+                current_test = 'seq' + op_type
+                results[current_test] = {}
+            elif 'IOPS=' in line and current_test:
+                iops_match = re.search(r'IOPS=(\d+)', line)
+                if iops_match:
+                    iops = iops_match.group(1)
+                    results[current_test]['IOPS'] = int(iops)
+            elif 'BW=' in line and current_test:
+                bw = re.search(r'BW=(\d+)([KMG]?)iB/s', line)
+                if bw:
+                    size = int(bw.group(1))
+                    unit = bw.group(2)
+                    if unit == 'K':
+                        size /= 1024
+                    elif unit == 'M':
+                        size /= (1024 ** 2)
+                    elif unit == 'G':
+                        size /= (1024 ** 3)
+                    results[current_test]['Bandwidth_MBps'] = size
+            elif 'lat (usec):' in line and current_test:
+                latencies = re.findall(r'(\d+)=([\d.]+)%', line)
+                results[current_test]['Latency_Distribution'] = {int(lat): float(percent) for lat, percent in latencies}
 
-## FIO Benchmark Results
-When running fio with the provided configuration file, the results were as follows:
+    return results
 
-```bash
+if __name__ == "__main__":
+    fio_output = """
 (.venv) sangeeth@sangeeth-ThinkPad-X1-Carbon-7th:/mnt/shared/sangeeth/Documents/RPI/Semester7/ECSE-4320/Project3$ sudo fio nvme_test.fio
 4k_randread_iops: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=libaio, iodepth=128
 4k_randwrite_iops: (g=1): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=libaio, iodepth=128
@@ -146,72 +177,16 @@ Run status group 4 (all jobs):
 
 Disk stats (read/write):
   nvme0n1: ios=9404684/8649319, sectors=140252848/133679360, merge=0/808, ticks=8968386/15020634, in_queue=23989712, util=85.19%
-```
+"""
 
-## Parsing the Results
-To parse these results, I wrote a Python script that extracts the relevant metrics from the fio output. The script looks for lines containing keywords like "IOPS", "BW", and "latency" to gather the performance data for each test.
-Here is a sample of the parsing script:
-
-```python
-import re
-def parse_fio_output(fio_output):
-    results = {}
-    current_test = None
-
-    for line in fio_output.splitlines():
-        if re.match(r'^\d+k_rand(read|write)_iops:', line):
-            current_test = 'rand' + re.search(r'_(read|write)_iops', line).group(1)
-            results[current_test] = {}
-        elif re.match(r'^\d+m_seq(read|write)_throughput:', line):
-            current_test = 'seq' + re.search(r'_(read|write)_throughput', line).group(1)
-            results[current_test] = {}
-        elif 'IOPS=' in line and current_test:
-            iops = re.search(r'IOPS=(\d+)', line).group(1)
-            results[current_test]['IOPS'] = int(iops)
-        elif 'BW=' in line and current_test:
-            bw = re.search(r'BW=(\d+)([KMG]?)iB/s', line)
-            if bw:
-                size = int(bw.group(1))
-                unit = bw.group(2)
-                if unit == 'K':
-                    size /= 1024
-                elif unit == 'M':
-                    size /= (1024 ** 2)
-                elif unit == 'G':
-                    size /= (1024 ** 3)
-                results[current_test]['Bandwidth_MBps'] = size
-        elif 'lat (usec):' in line and current_test:
-            latencies = re.findall(r'(\d+)=([\d.]+)%', line)
-            results[current_test]['Latency_Distribution'] = {int(lat): float(percent) for lat, percent in latencies}
-
-    return results
-```
-This script reads the fio output line by line, identifies the start of each test, and extracts the IOPS, bandwidth, and latency distribution for each test type. The results are stored in a dictionary for easy access and further analysis.
-
-### Script Output
-When I ran the parsing script on the fio output, I got the following structured results:
-
-```bash
-(.venv) sangeeth@sangeeth-ThinkPad-X1-Carbon-7th:/mnt/shared/sangeeth/Documents/RPI/Semester7/ECSE-4320/Project3$ python3 parse_results.py
-Test: randread
-  IOPS: 281
-  Latency_Distribution: {}
-
-Test: randwrite
-  IOPS: 11
-  Latency_Distribution: {}
-
-Test: seqread
-  IOPS: 1749
-  Latency_Distribution: {}
-
-Test: seqwrite
-  IOPS: 1074
-  Latency_Distribution: {}
-
-Disk stats (read/write):
-Disk stats (read/write):
-  nvme0n1: ios=9404684/8649319, sectors=140252848/133679360, merge=0/808, ticks=8968386/15020634, in_queue=23989712, util=85.19%
-
-(.venv) sangeeth@sangeeth-ThinkPad-X1-Carbon-7th:/mnt/shared/sangeeth/Documents/RPI/Semester7/ECSE-4320/Project3$ 
-```
+    parsed_results = parse_fio_output(fio_output)
+    for test, metrics in parsed_results.items():
+        print(f"Test: {test}")
+        for metric, value in metrics.items():
+            print(f"  {metric}: {value}")
+        print()
+    # The parsed_results dictionary now contains the extracted metrics
+    print("Disk stats (read/write):")
+    disk_stats = re.search(r'Disk stats \(read/write\):\n(.*)', fio_output, re.DOTALL)
+    if disk_stats:
+        print(disk_stats.group(0))

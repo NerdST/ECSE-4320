@@ -1,0 +1,58 @@
+[global]
+# Target device/partition
+filename=/dev/nvme0n1p7
+# Bypass OS cache for true disk performance measurement
+direct=1
+# Asynchronous I/O engine for high performance/NVMe
+ioengine=libaio
+# Run each test for 60 seconds
+runtime=60
+# Report results as a group
+group_reporting
+# Run each job sequentially (one after the other)
+stonewall
+# Time to warm up the test before collecting data
+ramp_time=5s
+# Use a single job for consistent results
+numjobs=1
+
+# --- MAX IOPS TESTS (4K Block Size) ---
+
+[4k_randread_iops]
+description=Max Random Read IOPS
+rw=randread
+bs=4k
+# High queue depth for maximizing IOPS
+iodepth=128
+
+[4k_randwrite_iops]
+description=Max Random Write IOPS
+rw=randwrite
+bs=4k
+iodepth=128
+
+# --- LATENCY TEST (4K Block Size, Low Queue Depth) ---
+
+[4k_randread_latency]
+description=Random Read Latency (QD=1)
+rw=randread
+bs=4k
+# Low queue depth for measuring true latency
+iodepth=1
+# Only one thread for this latency test
+numjobs=1
+
+# --- MAX THROUGHPUT TESTS (1M Block Size) ---
+
+[1m_seqread_throughput]
+description=Max Sequential Read Throughput
+rw=read
+bs=1m
+# Moderate-high queue depth for maximizing throughput
+iodepth=64
+
+[1m_seqwrite_throughput]
+description=Max Sequential Write Throughput
+rw=write
+bs=1m
+iodepth=64

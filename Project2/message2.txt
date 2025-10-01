@@ -1,0 +1,304 @@
+Nice — you’ve got the zero-queue baseline (idle_latency) working, and your Ryzen 7 7800X3D numbers look sensible. Below I’ll give you a compact, practical plan + ready-to-run `mlc` commands to cover the remaining Project #2 experiments (pattern/stride, R/W mixes, intensity sweeps, working-set), explain the important flags, show how to save output to files, and add `perf` recipes to correlate kernel runs with counters (cache/TLB impact). Use these directly on your Arch desktop.
+
+---
+
+# Quick notes / prerequisites
+
+1. **Huge pages.** MLC’s latency measurements are more accurate with large pages. Reserve 2 MiB pages before heavy runs (example reserves 4000 × 2MiB ≈ 8 GiB — adjust to available RAM):
+
+```bash
+# as root
+echo 4000 > /proc/sys/vm/nr_hugepages
+# verify
+cat /proc/meminfo | grep HugePages
+```
+
+If you can’t spare that many, document you used default pages and proceed — but note it in your methodology.
+
+2. **Run as root** (some MLC modes require it). Redirect stdout+stderr to files when saving results.
+
+3. **MLC flags reference (short):**
+
+* `--idle_latency` — single-access latencies (you used).
+* `--latency_matrix` — latency matrix per NUMA/socket/core.
+* `--bandwidth_matrix` — memory bandwidth matrix.
+* `--loaded_latency` — **key** for intensity (loaded) sweeps: has latency + concurrent throughput workload.
+* `-b <KiB>` — buffer size (KiB) used by latency test.
+* `-l <bytes>` — stride in bytes.
+* `-Wn` — read/write mix codes (see MLC help; `5` maps to 1:1, etc. I use explicit codes below).
+* `-k <core list>` — list of cores for bandwidth/throughput threads.
+* `-m <mask>` — CPU mask for throughput threads (alternatively use `-k`).
+* `-r` — random access for latency thread.
+* `-X` — use only one hyperthread per core (sometimes useful).
+* `-c n` — affinitize latency thread to core n.
+
+If a flag “didn’t work” earlier, make sure you’re using the right MLC binary and correct spacing/values; also `-b` expects **KiB** value (not a trailing unit) or you can pass smaller plain numbers (MLC accepts both styles on some builds — safer to use raw numbers or KiB units as MLC prints).
+
+---
+
+## 1) Pattern & granularity sweep (latency & bandwidth)
+
+We want latency and bandwidth for strides ~64 B, ~256 B, ~1024 B and both sequential vs random patterns. Use `--loaded_latency` for bandwidth under load and `--idle_latency` for clean latency.
+
+Run these commands and save output to text files:
+
+### Idle (single-access) latency per stride (sequential = default; `-r` => random)
+
+```bash
+# L1-size footprint (use ~32KB or 64KB)
+sudo ./mlc --idle_latency -b32      > mlc_idle_b32_seq.txt 2>&1
+sudo ./mlc --idle_latency -b32 -r   > mlc_idle_b32_rand.txt 2>&1
+
+# L2 footprint (~256 KB)
+sudo ./mlc --idle_latency -b256     > mlc_idle_b256_seq.txt 2>&1
+sudo ./mlc --idle_latency -b256 -r  > mlc_idle_b256_rand.txt 2>&1
+
+# L3 footprint (~96 MB on your CPU) — pick slightly under or the full size:
+sudo ./mlc --idle_latency -b98304   > mlc_idle_b98304_seq.txt 2>&1
+sudo ./mlc --idle_latency -b98304 -r> mlc_idle_b98304_rand.txt 2>&1
+
+# DRAM (1.8 GB)
+sudo ./mlc --idle_latency -b1800000 > mlc_idle_b1800000_seq.txt 2>&1
+sudo ./mlc --idle_latency -b1800000 -r> mlc_idle_b1800000_rand.txt 2>&1
+```
+
+### Bandwidth (bandwidth_matrix) & stride effect
+
+`--bandwidth_matrix` gives you bandwidth across nodes/sockets. For stride experiments use `--loaded_latency` or `--memory_bandwidth_scan` with `-l` stride.
+
+Examples (sequential B/W with different stride):
+
+```bash
+# 64B stride (typical cacheline)
+sudo ./mlc --loaded_latency -l 64 -t 5 -W5 > mlc_loaded_l64_1to1.txt 2>&1
+
+# 256B stride
+sudo ./mlc --loaded_latency -l 256 -t 5 -W5 > mlc_loaded_l256_1to1.txt 2>&1
+
+# 1024B stride
+sudo ./mlc --loaded_latency -l 1024 -t 5 -W5 > mlc_loaded_l1024_1to1.txt 2>&1
+```
+
+* `-t 5` sets run time to 5 s (increase if you want steadier numbers).
+* `-W5` selects a 1:1 read/write (check `mlc --help` mapping if you want exact mixes; many MLC builds use `-W5` for 1:1).
+
+If you want the peak **streaming** bandwidth matrix:
+
+```bash
+sudo ./mlc --bandwidth_matrix > mlc_bandwidth_matrix.txt 2>&1
+```
+
+---
+
+## 2) Read/Write mix sweep
+
+Use `--loaded_latency` with `-Wn` variants to generate different mixes. Example set (R-only, W-only, 70/30, 50/50):
+
+```bash
+# 100% read (use -R instead of -W)
+sudo ./mlc --loaded_latency -R -t 5 > mlc_loaded_readonly.txt 2>&1
+
+# 100% write: (use W=6 or a write heavy code; consult your mlc -W mapping)
+sudo ./mlc --loaded_latency -W6 -t 5 > mlc_loaded_writeonly.txt 2>&1
+
+# ~70/30 (pick W code close to that; e.g., -W3 or -W4 depending on mapping)
+sudo ./mlc --loaded_latency -W3 -t 5 > mlc_loaded_70_30.txt 2>&1
+
+# 50/50 (1:1)
+sudo ./mlc --loaded_latency -W5 -t 5 > mlc_loaded_50_50.txt 2>&1
+```
+
+**Important:** check `./mlc --help` mapping of `-W` codes on your binary to pick exact ratios; the help printed earlier shows many options.
+
+---
+
+## 3) Intensity sweep (throughput vs latency — find the knee)
+
+This is the central experiment to relate concurrency to latency. In `--loaded_latency`, you vary the number of throughput threads (throughput threads generate the load) while a latency thread measures latency.
+
+Two ways:
+
+* `-k <cores>` list: set which cores run throughput threads
+* `-m <mask>`: mask to indicate which CPUs to use for throughput
+
+Examples — vary throughput thread count: 1, 4, 8, 12, 16. Use `-k` ranges:
+
+```bash
+# 1 throughput thread (on core 1), latency thread runs on core 0 by default:
+sudo ./mlc --loaded_latency -k 1 -t 6 -W5 > mlc_loaded_k1.txt 2>&1
+
+# 4 throughput threads (cores 1-4)
+sudo ./mlc --loaded_latency -k 1-4 -t 6 -W5 > mlc_loaded_k1-4.txt 2>&1
+
+# 8 threads
+sudo ./mlc --loaded_latency -k 1-8 -t 6 -W5 > mlc_loaded_k1-8.txt 2>&1
+
+# 12 threads
+sudo ./mlc --loaded_latency -k 1-12 -t 6 -W5 > mlc_loaded_k1-12.txt 2>&1
+
+# All physical cores (7 or 8): adjust per your core count
+sudo ./mlc --loaded_latency -k 1-15 -t 6 -W5 > mlc_loaded_k1-15.txt 2>&1
+```
+
+Collect latency and aggregate throughput from each run, plot **throughput (MB/s or GB/s) vs latency (ns)**; the knee is where latency grows rapidly while throughput stagnates.
+
+---
+
+## 4) Working-set size sweep
+
+You already measured at several sizes. Do finer-grained sweeps across cache transitions and annotate:
+
+* L1 region: ~32–64 KiB
+* L2 region: ~256–1024 KiB (1 MiB per core for your CPU)
+* L3 region: ~several MB up to 96 MiB
+* DRAM: > 96 MB
+
+Example script (iterate buffer sizes for `idle_latency` and `loaded_latency`):
+
+```bash
+SIZES=(8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 16384*64)
+for b in "${SIZES[@]}"; do
+  sudo ./mlc --idle_latency -b $b >> mlc_workingset_idle.txt 2>&1
+  sudo ./mlc --loaded_latency -b $b -t 4 -W5 >> mlc_workingset_loaded.txt 2>&1
+done
+```
+
+(Replace `16384*64` with explicit number if needed.)
+
+---
+
+## 5) Cache-miss impact (tie to kernel runs)
+
+MLC gives you the hardware limits. To measure how cache miss ratio affects SAXPY/dot/element:
+
+1. Use your microbench kernels (from repo) and run them while collecting `perf` counters (instructions, cycles, LLC-loads, LLC-load-misses, dTLB-load-misses). Example:
+
+```bash
+# run kernel and collect basic counters (non-root)
+perf stat -e cycles,instructions,cache-references,cache-misses,LLC-loads,LLC-load-misses -o perf_saxpy_n1.txt -- ./bin/saxpy_simd 1048576
+```
+
+Or with pinning:
+
+```bash
+taskset -c 0 perf stat -e cycles,instructions,cache-references,cache-misses,LLC-loads,LLC-load-misses -o perf_saxpy_n1.txt -- ./bin/saxpy_simd 1048576
+```
+
+2. Vary the workload’s working set size (N) to force more misses (small N fits caches → fewer misses). For each N collect `perf` and runtime. Then compute miss rate and correlate with GFLOP/s.
+
+3. For controlling miss rate you can:
+
+* change N (footprint).
+* change stride/touch pattern in the kernel (strided access increases misses).
+* add random indexing.
+
+---
+
+## 6) TLB-miss impact
+
+Two approaches:
+
+A. **Vary page locality**: access arrays with different strides but ensure touches cross page boundaries. E.g., use stride ≈ page size (4 KiB) to cause more TLB entries.
+
+B. **Huge pages**: compare runs with normal pages vs large pages (2 MiB). To use 2MiB huge pages you can:
+
+* reserve hugepages (as earlier: `echo N > /proc/sys/vm/nr_hugepages`)
+* modify your kernel program to mmap with `MAP_HUGETLB` and use `-L` in MLC.
+
+For perf TLB events:
+
+```bash
+# dTLB loads/misses
+sudo perf stat -e dtlb_loads,dtlb_load_misses,dtlb_store_misses -o perf_tlb.txt -- ./bin/saxpy_simd 1048576
+```
+
+(Exact event names can vary by kernel/hw; use `perf list | grep dtlb` to find available names.)
+
+---
+
+## How to redirect outputs to files (recommended)
+
+Always capture both stdout and stderr:
+
+```bash
+sudo ./mlc --loaded_latency -k 1-8 -t 6 -W5 > results/mlc_loaded_k1-8.txt 2>&1
+```
+
+Or timestamped:
+
+```bash
+sudo ./mlc --loaded_latency -k 1-8 -t 6 -W5 > results/$(date +%Y%m%d_%H%M%S)_mlc_loaded_k1-8.txt 2>&1
+```
+
+For `perf`:
+
+```bash
+# perf stat to text
+perf stat -e cycles,instructions,cache-misses,LLC-loads,LLC-load-misses -o perf_saxpy.txt -- ./bin/saxpy_simd 1048576
+# perf record + report (for hotspots)
+perf record -F 99 -g -- ./bin/saxpy_simd 1048576
+perf report > perf_saxpy_report.txt
+```
+
+---
+
+## Example checklist & commands to run (put in a script)
+
+Create `scripts/run_mlc_suite.sh` that runs the important combos (idle L1/L2/L3/DRAM, stride sweep for loaded_latency, read/write mixes, intensity sweep). Example skeleton:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p results
+
+# idle latencies
+sudo ./mlc --idle_latency -b32  > results/idle_b32.txt  2>&1
+sudo ./mlc --idle_latency -b256 > results/idle_b256.txt 2>&1
+sudo ./mlc --idle_latency -b98304 > results/idle_b98304.txt 2>&1
+sudo ./mlc --idle_latency -b1800000 > results/idle_b1800000.txt 2>&1
+
+# stride loaded latency
+for s in 64 256 1024; do
+  sudo ./mlc --loaded_latency -l $s -t 6 -W5 > results/loaded_stride_${s}.txt 2>&1
+done
+
+# R/W mixes
+sudo ./mlc --loaded_latency -R -t 6 > results/loaded_readonly.txt 2>&1
+sudo ./mlc --loaded_latency -W6 -t 6 > results/loaded_writeonly.txt 2>&1
+sudo ./mlc --loaded_latency -W3 -t 6 > results/loaded_70_30.txt 2>&1
+sudo ./mlc --loaded_latency -W5 -t 6 > results/loaded_50_50.txt 2>&1
+
+# intensity sweep
+for cores in "1" "1-4" "1-8" "1-12" "1-15"; do
+  sudo ./mlc --loaded_latency -k ${cores} -t 6 -W5 > results/loaded_k${cores//-/to}.txt 2>&1
+done
+```
+
+---
+
+## Interpreting results (short guidance)
+
+* **Idle latencies**: use these to create the table: L1, L2, L3, DRAM in ns. Convert to CPU cycles if needed: `cycles = ns * (MHz)`.
+* **Stride & loaded_latency**: plot bandwidth vs stride and latency vs stride. Small strides better utilize cache lines; large strides degrade prefetch efficiency.
+* **R/W mixes**: write-heavy patterns typically show lower effective read bandwidth and higher latency due to writebacks, RFOs, and controller behavior.
+* **Intensity sweep**: plot throughput (GB/s) on x-axis and latency (ns) on y-axis. Knee = where latency rises rapidly while throughput levels off. Verify Little’s law: `Throughput ≈ Concurrency / Latency`.
+* **Working set**: annotate ranges where latency jumps — these correspond to crossing L1→L2→L3→DRAM.
+
+---
+
+## Next steps I recommend you run now
+
+1. Reserve a reasonable number of hugepages (if possible) and re-run the key `idle_latency` sizes for L1/L2/L3/DRAM and save.
+2. Run the `loaded_latency` stride sweep (64, 256, 1024) and save outputs.
+3. Run the intensity sweep (1,4,8,12,16 throughput threads) using `-k`.
+4. Run a couple of SAXPY/dot element kernel runs at representative N (small, mid, large) while collecting `perf stat` counters.
+5. Post a sample of the `mlc` outputs and `perf` outputs here and I’ll help interpret (I can extract the key numbers and show how to compute throughput and find the knee).
+
+---
+
+If you want, I’ll:
+
+* produce a ready-to-copy `run_mlc_suite.sh` script (full) that implements the checklist above, or
+* make a small Jupyter/Python analyzer that parses the MLC textual output and emits CSVs ready for plotting.
+
+Which would you like next?

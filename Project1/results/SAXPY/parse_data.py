@@ -6,7 +6,7 @@ import sys
 
 # Determine directory containing this script and look for CSVs beside it
 SCRIPT_DIR = Path(__file__).parent
-CSV_GLOB = str(SCRIPT_DIR / 'results_win_*.csv')  # adjust pattern if needed
+CSV_GLOB = str(SCRIPT_DIR / 'saxpy_*.csv')  # adjust pattern if needed
 OUTPUT_DIR = SCRIPT_DIR / 'graphs'
 OUTPUT_DIR.mkdir(exist_ok=True)
 
