@@ -5,54 +5,179 @@ filename=/dev/nvme0n1p7
 direct=1
 # Asynchronous I/O engine for high performance/NVMe
 ioengine=libaio
-# Run each test for 60 seconds
-runtime=60
+# Run each test for 30 seconds
+runtime=30
 # Report results as a group
 group_reporting
-# Run each job sequentially (one after the other)
-stonewall
-# Time to warm up the test before collecting data
-ramp_time=5s
 # Use a single job for consistent results
 numjobs=1
+# Time-based testing
+time_based=1
+# Size of the test file
+size=10G
 
-# --- MAX IOPS TESTS (4K Block Size) ---
+# --- 1. Zero-queue baselines (QD=1) ---
 
-[4k_randread_iops]
-description=Max Random Read IOPS
+[baseline_4k_randread]
 rw=randread
 bs=4k
-# High queue depth for maximizing IOPS
-iodepth=128
+iodepth=1
 
-[4k_randwrite_iops]
-description=Max Random Write IOPS
+[baseline_4k_randwrite]
 rw=randwrite
 bs=4k
-iodepth=128
+iodepth=1
 
-# --- LATENCY TEST (4K Block Size, Low Queue Depth) ---
+[baseline_4k_read]
+rw=read
+bs=4k
+iodepth=1
 
-[4k_randread_latency]
-description=Random Read Latency (QD=1)
+[baseline_4k_write]
+rw=write
+bs=4k
+iodepth=1
+
+[baseline_128k_randread]
+rw=randread
+bs=128k
+iodepth=1
+
+[baseline_128k_randwrite]
+rw=randwrite
+bs=128k
+iodepth=1
+
+[baseline_128k_read]
+rw=read
+bs=128k
+iodepth=1
+
+[baseline_128k_write]
+rw=write
+bs=128k
+iodepth=1
+
+# --- 2. Block-size sweep (QD=1) ---
+
+[bsweep_4k_randread]
 rw=randread
 bs=4k
-# Low queue depth for measuring true latency
 iodepth=1
-# Only one thread for this latency test
-numjobs=1
 
-# --- MAX THROUGHPUT TESTS (1M Block Size) ---
+[bsweep_16k_randread]
+rw=randread
+bs=16k
+iodepth=1
 
-[1m_seqread_throughput]
-description=Max Sequential Read Throughput
+[bsweep_32k_randread]
+rw=randread
+bs=32k
+iodepth=1
+
+[bsweep_64k_randread]
+rw=randread
+bs=64k
+iodepth=1
+
+[bsweep_128k_randread]
+rw=randread
+bs=128k
+iodepth=1
+
+[bsweep_256k_randread]
+rw=randread
+bs=256k
+iodepth=1
+
+[bsweep_4k_read]
 rw=read
-bs=1m
-# Moderate-high queue depth for maximizing throughput
+bs=4k
+iodepth=1
+
+[bsweep_16k_read]
+rw=read
+bs=16k
+iodepth=1
+
+[bsweep_32k_read]
+rw=read
+bs=32k
+iodepth=1
+
+[bsweep_64k_read]
+rw=read
+bs=64k
+iodepth=1
+
+[bsweep_128k_read]
+rw=read
+bs=128k
+iodepth=1
+
+[bsweep_256k_read]
+rw=read
+bs=256k
+iodepth=1
+
+# --- 3. Read/Write mix sweep (4K random, QD=1) ---
+
+[mix_100r]
+rw=randrw
+rwmixread=100
+bs=4k
+iodepth=1
+
+[mix_70r]
+rw=randrw
+rwmixread=70
+bs=4k
+iodepth=1
+
+[mix_50r]
+rw=randrw
+rwmixread=50
+bs=4k
+iodepth=1
+
+# --- 4. Queue-depth sweep (4K random read) ---
+
+[qd_1]
+rw=randread
+bs=4k
+iodepth=1
+
+[qd_2]
+rw=randread
+bs=4k
+iodepth=2
+
+[qd_4]
+rw=randread
+bs=4k
+iodepth=4
+
+[qd_8]
+rw=randread
+bs=4k
+iodepth=8
+
+[qd_16]
+rw=randread
+bs=4k
+iodepth=16
+
+[qd_32]
+rw=randread
+bs=4k
+iodepth=32
+
+[qd_64]
+rw=randread
+bs=4k
 iodepth=64
 
-[1m_seqwrite_throughput]
-description=Max Sequential Write Throughput
-rw=write
-bs=1m
-iodepth=64
+[qd_128]
+rw=randread
+bs=4k
+iodepth=128

@@ -1,192 +1,520 @@
+#!/usr/bin/env python3
 import re
-def parse_fio_output(fio_output):
-    results = {}
-    current_test = None
+import os
+import math
+import json
+from dataclasses import dataclass, field
+from typing import Dict, Optional, List, Tuple
+import matplotlib.pyplot as plt
+import pandas as pd
 
-    for line in fio_output.splitlines():
-        match_rand = re.match(r'^\d+k_rand(read|write)_iops:', line)
-        if match_rand:
-            op_type = match_rand.group(1)
-            current_test = 'rand' + op_type
-            results[current_test] = {}
+FIO_FILE = "results/FIO_Benchmark.txt" if os.path.exists("results/FIO_Benchmark.txt") else "FIO_Benchmark.txt"
+PLOTS_DIR = "plots"
+
+@dataclass
+class RWStats:
+    iops: Optional[float] = None
+    bw_MBps: Optional[float] = None
+    bw_MiBps: Optional[float] = None
+    lat_avg_usec: Optional[float] = None   # avg completion latency (convert to usec)
+    lat_unit: Optional[str] = None
+    percentiles_usec: Dict[str, float] = field(default_factory=dict)
+
+@dataclass
+class JobResult:
+    name: str
+    mode: Optional[str] = None      # randread, randwrite, read, write, randrw
+    bs: Optional[str] = None
+    iodepth: Optional[int] = None
+    executed: bool = False  # True if we saw a results header (groupid=...) for this job
+    read: RWStats = field(default_factory=RWStats)
+    write: RWStats = field(default_factory=RWStats)
+    mixed: bool = False
+    meta: Dict = field(default_factory=dict)
+
+def to_number(v: str) -> float:
+    try:
+        return float(v)
+    except:
+        return math.nan
+
+def parse_iops_bw(line: str) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    # Examples:
+    # read: IOPS=113k, BW=1097MiB/s (1150MB/s)
+    # write: IOPS=14.2k, BW=472MiB/s (495MB/s)
+    iops_match = re.search(r'IOPS=([\d\.]+)([kM]?)', line)
+    bw_mib_match = re.search(r'BW=([\d\.]+)(KiB|MiB|GiB)/s', line)
+    bw_mb_paren = re.search(r'\(([\d\.]+)MB/s\)', line)
+    def scale(num, suf):
+        num = float(num)
+        if suf == 'k': return num * 1_000
+        if suf == 'M': return num * 1_000_000
+        return num
+    iops = bw_MBps = bw_MiBps = None
+    if iops_match:
+        iops = scale(iops_match.group(1), iops_match.group(2))
+    if bw_mib_match:
+        val = float(bw_mib_match.group(1))
+        unit = bw_mib_match.group(2)
+        factor = {'KiB': 1/1024, 'MiB': 1.0, 'GiB': 1024}.get(unit, 1.0)
+        bw_MiBps = val * factor
+        bw_MBps = bw_MiBps * 1.048576  # MiB->MB
+    if bw_mb_paren and bw_MBps is None:
+        bw_MBps = float(bw_mb_paren.group(1))
+    return iops, bw_MBps, bw_MiBps
+
+def normalize_latency_unit(avg: float, unit: str) -> float:
+    if avg is None or math.isnan(avg):
+        return math.nan
+    if unit == 'nsec':
+        return avg / 1000.0
+    if unit == 'usec':
+        return avg
+    if unit == 'msec':
+        return avg * 1000.0
+    return avg
+
+def parse_percentiles(block_lines: List[str], unit: str) -> Dict[str, float]:
+    pct = {}
+    line_join = ' '.join(block_lines)
+    # Pattern like 99.00th=[14091]
+    for m in re.finditer(r'(\d{1,2}\.?\d{0,2})th=\[\s*([\d\.]+)\]', line_join):
+        p = m.group(1)
+        val = float(m.group(2))
+        # Convert based on unit
+        if unit == 'nsec':
+            val = val / 1000.0
+        elif unit == 'msec':
+            val = val * 1000.0
+        pct[p] = val
+    # Derive p95/p99/p99.9 if present with keys '95.00', etc.
+    aliases = {'95': '95.00', '99': '99.00', '99.9': '99.90', '99.95': '99.95', '99.99': '99.99'}
+    for short, full in aliases.items():
+        if full in pct and short not in pct:
+            pct[short] = pct[full]
+    return pct
+
+def parse_fio(filename: str) -> Dict[str, JobResult]:
+    with open(filename, 'r', errors='ignore') as f:
+        lines = f.readlines()
+
+    jobs: Dict[str, JobResult] = {}
+    i = 0
+    current_job: Optional[JobResult] = None
+    pct_collect: List[str] = []
+    pct_target_section = None
+    pct_unit = None
+
+    # Match any job header (definition or results)
+    any_header_regex = re.compile(r'^([A-Za-z0-9_\-\.]+): \(')
+    iodepth_regex_inline = re.compile(r'iodepth=(\d+)')
+    mode_regex_inline = re.compile(r'rw=([a-zA-Z0-9]+)')
+    bs_regex_inline = re.compile(r'bs=\(R\)\s*([0-9\.A-Za-z]+)-')
+
+    while i < len(lines):
+        line = lines[i].rstrip('\n')
+
+        header_match = any_header_regex.match(line)
+        if header_match:
+            name = header_match.group(1)
+            job = jobs.get(name, JobResult(name=name))
+            jobs[name] = job
+
+            # Capture inline metadata (present in definition lines "(g=0)" not "(groupid=...)")
+            mm = mode_regex_inline.search(line)
+            if mm:
+                job.mode = mm.group(1)
+
+            bm = bs_regex_inline.search(line)
+            if bm:
+                job.bs = bm.group(1)
+
+            im = iodepth_regex_inline.search(line)
+            if im:
+                job.iodepth = int(im.group(1))
+
+            # Only set current_job when this is a results header (has groupid=)
+            if '(groupid=' in line:
+                current_job = job
+                current_job.executed = True
+            else:
+                # definition line only; do not change current_job
+                pass
+            i += 1
+            continue
+
+        if current_job:
+            # read/write summary lines
+            if line.strip().startswith('read: IOPS='):
+                iops, bw_MBps, bw_MiBps = parse_iops_bw(line)
+                current_job.read.iops = iops
+                current_job.read.bw_MBps = bw_MBps
+                current_job.read.bw_MiBps = bw_MiBps
+            elif line.strip().startswith('write: IOPS='):
+                iops, bw_MBps, bw_MiBps = parse_iops_bw(line)
+                current_job.write.iops = iops
+                current_job.write.bw_MBps = bw_MBps
+                current_job.write.bw_MiBps = bw_MiBps
+
+            # Average completion latency
+            if line.strip().startswith('clat ('):
+                m = re.search(r'clat \((nsec|usec|msec)\):.*avg=([\d\.]+)', line)
+                if m:
+                    unit = m.group(1)
+                    avg = float(m.group(2))
+                    # Heuristic: assign to first stats object lacking avg
+                    target = current_job.read if current_job.read.lat_avg_usec is None else current_job.write
+                    target.lat_unit = unit
+                    target.lat_avg_usec = normalize_latency_unit(avg, unit)
+
+            # Percentiles collection
+            if 'clat percentiles (' in line:
+                pct_collect = []
+                pct_target_section = 'clat'
+                pct_unit = re.search(r'clat percentiles \((nsec|usec|msec)\):', line).group(1)
+            elif pct_target_section and line.strip().startswith('|'):
+                pct_collect.append(line.strip())
+            else:
+                if pct_target_section and pct_collect:
+                    pct = parse_percentiles(pct_collect, pct_unit)
+                    target = current_job.read if not current_job.read.percentiles_usec else current_job.write
+                    target.percentiles_usec.update(pct)
+                    pct_collect = []
+                    pct_target_section = None
+                    pct_unit = None
+
+        i += 1
+
+    # Infer missing mode from job name if absent
+    for name, job in jobs.items():
+        if not job.mode:
+            lowered = name.lower()
+            if 'randread' in lowered: job.mode = 'randread'
+            elif 'randwrite' in lowered: job.mode = 'randwrite'
+            elif re.search(r'\bread\b', lowered): job.mode = 'read'
+            elif re.search(r'\bwrite\b', lowered): job.mode = 'write'
+            elif 'randrw' in lowered: job.mode = 'randrw'
+    return jobs
+
+def df_from_jobs(jobs: Dict[str, JobResult]) -> pd.DataFrame:
+    rows = []
+    for name, jr in jobs.items():
+        def get_pct(stats: RWStats, p):
+            return stats.percentiles_usec.get(str(p)) or stats.percentiles_usec.get(f"{p}.00") or math.nan
+        rows.append({
+            'job': name,
+            'mode': jr.mode,
+            'bs': jr.bs,
+            'iodepth': jr.iodepth,
+            'read_iops': jr.read.iops,
+            'read_bw_MBps': jr.read.bw_MBps,
+            'read_lat_avg_us': jr.read.lat_avg_usec,
+            'read_p50_us': get_pct(jr.read, '50'),
+            'read_p95_us': get_pct(jr.read, '95'),
+            'read_p99_us': get_pct(jr.read, '99'),
+            'read_p999_us': get_pct(jr.read, '99.9'),
+            'write_iops': jr.write.iops,
+            'write_bw_MBps': jr.write.bw_MBps,
+            'write_lat_avg_us': jr.write.lat_avg_usec,
+            'write_p50_us': get_pct(jr.write, '50'),
+            'write_p95_us': get_pct(jr.write, '95'),
+            'write_p99_us': get_pct(jr.write, '99'),
+            'write_p999_us': get_pct(jr.write, '99.9'),
+        })
+    return pd.DataFrame(rows)
+
+def save_table(df: pd.DataFrame, path: str):
+    df.to_csv(path, index=False)
+    print(f"Wrote {path}")
+
+def zero_queue_baselines(df: pd.DataFrame):
+    mask = (df['iodepth'] == 1)
+    subset = df[mask].copy()
+    if subset.empty:
+        print("No QD=1 jobs found.")
+        return
+
+    def norm_bs(bs):
+        if not isinstance(bs, str):
+            return None
+        s = bs.lower()
+        if s.endswith('b') and s[:-1].isdigit():
+            # bytes → try convert
+            try:
+                val = int(s[:-1])
+                if val == 4096:
+                    return '4k'
+            except:
+                pass
+        return s.replace('kib','k').replace('kb','k')
+
+    subset['bs_norm'] = subset['bs'].map(norm_bs)
+
+    targets = []
+
+    # 4K random read
+    rr = subset[(subset['mode'] == 'randread') & (subset['bs_norm'].isin(['4k','4096b', None]))]
+    if not rr.empty:
+        row = rr.head(1).copy()
+        row['baseline'] = '4K_randread'
+        targets.append(row)
+    # 4K random write
+    rw = subset[(subset['mode'] == 'randwrite') & (subset['bs_norm'].isin(['4k','4096b', None]))]
+    if not rw.empty:
+        row = rw.head(1).copy()
+        row['baseline'] = '4K_randwrite'
+        targets.append(row)
+    # 128K sequential read
+    sr = subset[(subset['mode'] == 'read') & (subset['bs_norm'].str.contains('128k', na=False))]
+    if not sr.empty:
+        row = sr.head(1).copy()
+        row['baseline'] = '128K_read'
+        targets.append(row)
+    # 128K sequential write
+    sw = subset[(subset['mode'] == 'write') & (subset['bs_norm'].str.contains('128k', na=False))]
+    if not sw.empty:
+        row = sw.head(1).copy()
+        row['baseline'] = '128K_write'
+        targets.append(row)
+
+    if not targets:
+        print("Baseline patterns not present in file.")
+        return
+
+    baseline_df = pd.concat(targets)
+    cols = [
+        'baseline',
+        'read_lat_avg_us','read_p50_us','read_p95_us','read_p99_us',
+        'write_lat_avg_us','write_p50_us','write_p95_us','write_p99_us',
+        'read_iops','write_iops','read_bw_MBps','write_bw_MBps'
+    ]
+    existing = [c for c in cols if c in baseline_df.columns]
+    baseline_df[existing].to_markdown('baseline_table.md', index=False)
+    print("Zero-queue baseline table -> baseline_table.md")
+
+def queue_depth_sweep(df: pd.DataFrame):
+    qd = df[df['job'].str.match(r'qd_\d+') & df['mode'].str.contains('randread', na=False)]
+    if qd.empty:
+        print("No queue depth sweep data found.")
+        return
+    qd = qd.copy()
+    qd['qd'] = qd['job'].str.extract(r'qd_(\d+)').astype(int)
+    qd = qd.sort_values('qd')
+
+    thr = qd['read_iops']
+    lat = qd['read_lat_avg_us']
+    fig, ax = plt.subplots(figsize=(5,4))
+    ax.plot(lat, thr, marker='o')
+    for x,y,q in zip(lat, thr, qd['qd']):
+        ax.annotate(f"QD{q}", (x,y), textcoords="offset points", xytext=(4,4), fontsize=8)
+    ax.set_xlabel("Avg Latency (usec)")
+    ax.set_ylabel("Throughput (IOPS)")
+    ax.set_title("Throughput vs Latency (4K randread)")
+    ax.grid(True, linestyle='--', alpha=0.4)
+
+    # Knee via curvature-like heuristic (relative slope drop)
+    knee_idx = None
+    slopes = []
+    for i in range(1, len(qd)):
+        d_thr = thr.iloc[i] - thr.iloc[i-1]
+        d_lat = lat.iloc[i] - lat.iloc[i-1]
+        if d_lat > 0:
+            slopes.append((i, d_thr / d_lat))
+    if slopes:
+        max_slope = max(s for _, s in slopes)
+        for i, s in slopes:
+            if s < 0.3 * max_slope:
+                knee_idx = i
+                break
+    if knee_idx is not None:
+        ax.axvline(lat.iloc[knee_idx], color='red', linestyle='--', alpha=0.6, label='Knee')
+        ax.legend()
+
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+    out = os.path.join(PLOTS_DIR, "qd_tradeoff.png")
+    plt.tight_layout()
+    plt.savefig(out, dpi=140)
+    plt.close()
+    print(f"Wrote {out}")
+
+    # Tail latency table (mid + knee)
+    mid_idx = len(qd)//2
+    chosen = []
+    if knee_idx is not None:
+        chosen.append(qd.iloc[knee_idx])
+    chosen.append(qd.iloc[mid_idx])
+    tail_rows = []
+    for _, row in pd.DataFrame(chosen).drop_duplicates(subset='qd').iterrows():
+        tail_rows.append({
+            'job': row['job'],
+            'qd': row['qd'],
+            'iops': row['read_iops'],
+            'avg_lat_us': row['read_lat_avg_us'],
+            'p50_us': row.get('read_p50_us'),
+            'p95_us': row.get('read_p95_us'),
+            'p99_us': row.get('read_p99_us'),
+            'p99.9_us': row.get('read_p999_us'),
+        })
+    tail_df = pd.DataFrame(tail_rows)
+    tail_df.to_markdown("tail_latency.md", index=False)
+    print("Tail latency table -> tail_latency.md")
+
+def block_size_sweep(df: pd.DataFrame):
+    # Expect job names like bsweep_<size>_(randread|read)
+    sweep = df[df['job'].str.startswith('bsweep_')]
+    if sweep.empty:
+        print("No block-size sweep data found.")
+        return
+
+    # Derive size token
+    sweep = sweep.copy()
+    sweep['size_tok'] = sweep['job'].str.extract(r'bsweep_([0-9]+k|[0-9]+m|4k|16k|32k|64k|128k|256k|512k|1m)', expand=False)
+    if sweep['size_tok'].isna().all():
+        print("Could not parse block sizes for sweep.")
+        return
+
+    # Convert to KiB numeric
+    def to_kib(tok):
+        if pd.isna(tok):
+            return math.nan
+        tok = tok.lower()
+        if tok.endswith('k'):
+            return float(tok[:-1])
+        if tok.endswith('m'):
+            return float(tok[:-1]) * 1024.0
+        return math.nan
+    sweep['size_kib'] = sweep['size_tok'].map(to_kib)
+
+    # Keep only rows with some read metrics
+    sweep = sweep[~sweep['read_iops'].isna()]
+
+    for pattern in ['randread', 'read']:
+        pat_df = sweep[sweep['mode'] == pattern].sort_values('size_kib')
+        if pat_df.empty:
+            continue
+
+        sizes = pat_df['size_kib'].values
+        read_iops = pat_df['read_iops'].values
+        read_bw = pat_df['read_bw_MBps'].values
+        read_lat = pat_df['read_lat_avg_us'].values
+
+        # Mask for IOPS vs MB/s demarcation
+        iops_mask = sizes <= 64   # ≤64KiB show IOPS
+        mb_mask = sizes >= 128    # ≥128KiB show MB/s
+
+        fig, ax1 = plt.subplots(figsize=(7,4))
+        ax1.set_xscale('log', base=2)
+        ax1.set_xlabel("Block Size (KiB) (log2)")
+        ax1.set_ylabel("IOPS (≤64KiB)")
+
+        if iops_mask.any():
+            ax1.plot(sizes[iops_mask], read_iops[iops_mask], marker='o', label='Read IOPS', color='tab:blue')
+
+        ax2 = ax1.twinx()
+        ax2.set_ylabel("Throughput MB/s (≥128KiB)")
+        if mb_mask.any():
+            ax2.plot(sizes[mb_mask], read_bw[mb_mask], marker='s', label='Read MB/s', color='tab:orange')
+
+        ax3 = ax1.twinx()
+        ax3.spines.right.set_position(("outward", 55))
+        ax3.set_ylabel("Avg Latency (usec)")
+        ax3.plot(sizes, read_lat, marker='^', label='Avg Lat (us)', color='tab:green')
+
+        ax1.set_title(f"Block Size Sweep ({pattern})")
+        ax1.grid(True, which='both', linestyle='--', alpha=0.4)
+
+        # Combine legends
+        handles = []
+        labels = []
+        for a in (ax1, ax2, ax3):
+            h, l = a.get_legend_handles_labels()
+            handles.extend(h); labels.extend(l)
+        ax1.legend(handles, labels, fontsize=8, loc='best')
+
+        os.makedirs(PLOTS_DIR, exist_ok=True)
+        out = os.path.join(PLOTS_DIR, f"bsweep_{pattern}.png")
+        plt.tight_layout()
+        plt.savefig(out, dpi=140)
+        plt.close()
+        print(f"Wrote {out}")
+
+def mix_sweep(df: pd.DataFrame):
+    mix = df[df['job'].str.startswith('mix_')].copy()
+    if mix.empty:
+        print("No read/write mix data found.")
+        return
+
+    # Extract % read (assumes naming like mix_100r, mix_70r, mix_50r etc.)
+    mix['pct_read'] = mix['job'].str.extract(r'mix_(\d+)[rR]').astype(float)
+    if mix['pct_read'].isna().all():
+        print("Could not parse read percentages in mix jobs.")
+        return
+
+    mix = mix.sort_values('pct_read', ascending=False)
+
+    fig, ax1 = plt.subplots(figsize=(6,4))
+    ax1.plot(mix['pct_read'], mix['read_bw_MBps'].fillna(0), marker='o', label='Read MB/s', color='tab:blue')
+    ax1.plot(mix['pct_read'], mix['write_bw_MBps'].fillna(0), marker='s', label='Write MB/s', color='tab:orange')
+    ax1.set_xlabel("% Read (4K rand mix)")
+    ax1.set_ylabel("Throughput (MB/s)")
+
+    ax2 = ax1.twinx()
+    ax2.plot(mix['pct_read'], mix['read_lat_avg_us'], marker='^', label='Read Lat (us)', color='tab:green')
+    ax2.plot(mix['pct_read'], mix['write_lat_avg_us'], marker='v', label='Write Lat (us)', color='tab:red')
+    ax2.set_ylabel("Latency (usec)")
+
+    ax1.set_title("Read/Write Mix Sweep")
+    ax1.grid(True, linestyle='--', alpha=0.4)
+
+    handles = []
+    labels = []
+    for a in (ax1, ax2):
+        h, l = a.get_legend_handles_labels()
+        handles.extend(h); labels.extend(l)
+    ax1.legend(handles, labels, fontsize=8, loc='best')
+
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+    out = os.path.join(PLOTS_DIR, "mix_sweep.png")
+    plt.tight_layout()
+    plt.savefig(out, dpi=140)
+    plt.close()
+    print(f"Wrote {out}")
+
+def main():
+    if not os.path.exists(FIO_FILE):
+        print(f"Missing {FIO_FILE}")
+        return
+    jobs = parse_fio(FIO_FILE)
+
+    # Identify jobs that were never executed (definitions only) – keep only executed or those with some stats
+    executed_jobs: Dict[str, JobResult] = {}
+    skipped = []
+    for name, jr in jobs.items():
+        has_metrics = any([
+            jr.read.iops, jr.read.lat_avg_usec, jr.write.iops, jr.write.lat_avg_usec,
+            jr.read.percentiles_usec, jr.write.percentiles_usec
+        ])
+        if jr.executed or has_metrics:
+            executed_jobs[name] = jr
         else:
-            match_seq = re.match(r'^\d+m_seq(read|write)_throughput:', line)
-            if match_seq:
-                op_type = match_seq.group(1)
-                current_test = 'seq' + op_type
-                results[current_test] = {}
-            elif 'IOPS=' in line and current_test:
-                iops_match = re.search(r'IOPS=(\d+)', line)
-                if iops_match:
-                    iops = iops_match.group(1)
-                    results[current_test]['IOPS'] = int(iops)
-            elif 'BW=' in line and current_test:
-                bw = re.search(r'BW=(\d+)([KMG]?)iB/s', line)
-                if bw:
-                    size = int(bw.group(1))
-                    unit = bw.group(2)
-                    if unit == 'K':
-                        size /= 1024
-                    elif unit == 'M':
-                        size /= (1024 ** 2)
-                    elif unit == 'G':
-                        size /= (1024 ** 3)
-                    results[current_test]['Bandwidth_MBps'] = size
-            elif 'lat (usec):' in line and current_test:
-                latencies = re.findall(r'(\d+)=([\d.]+)%', line)
-                results[current_test]['Latency_Distribution'] = {int(lat): float(percent) for lat, percent in latencies}
-
-    return results
+            skipped.append(name)
+    if skipped:
+        print(f"Warning: {len(skipped)} job definitions had no results (likely due to group_reporting combining output or they were not run):")
+        print("  " + ", ".join(skipped[:12]) + ("..." if len(skipped) > 12 else ""))
+        print("Run those jobs separately (e.g., separate .fio runs without group_reporting) to collect their individual metrics.")
+    jobs = executed_jobs
+    df = df_from_jobs(jobs)
+    os.makedirs("tables", exist_ok=True)
+    save_table(df, os.path.join("tables","all_jobs.csv"))
+    # Experiments
+    zero_queue_baselines(df)
+    block_size_sweep(df)
+    mix_sweep(df)
+    queue_depth_sweep(df)
+    # Save raw JSON
+    with open(os.path.join("tables","raw_jobs.json"), 'w') as f:
+        json.dump({k: v.__dict__ for k,v in jobs.items()}, f, default=lambda o: o.__dict__, indent=2)
+    print("Done.")
 
 if __name__ == "__main__":
-    fio_output = """
-(.venv) sangeeth@sangeeth-ThinkPad-X1-Carbon-7th:/mnt/shared/sangeeth/Documents/RPI/Semester7/ECSE-4320/Project3$ sudo fio nvme_test.fio
-4k_randread_iops: (g=0): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=libaio, iodepth=128
-4k_randwrite_iops: (g=1): rw=randwrite, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=libaio, iodepth=128
-4k_randread_latency: (g=2): rw=randread, bs=(R) 4096B-4096B, (W) 4096B-4096B, (T) 4096B-4096B, ioengine=libaio, iodepth=1
-1m_seqread_throughput: (g=3): rw=read, bs=(R) 1024KiB-1024KiB, (W) 1024KiB-1024KiB, (T) 1024KiB-1024KiB, ioengine=libaio, iodepth=64
-1m_seqwrite_throughput: (g=4): rw=write, bs=(R) 1024KiB-1024KiB, (W) 1024KiB-1024KiB, (T) 1024KiB-1024KiB, ioengine=libaio, iodepth=64
-fio-3.36
-Starting 5 processes
-Jobs: 1 (f=1): [_(4),W(1)][96.8%][w=913MiB/s][w=912 IOPS][eta 00m:06s]        
-4k_randread_iops: (groupid=0, jobs=1): err= 0: pid=11160: Tue Sep 30 22:14:21 2025
-  Description  : [Max Random Read IOPS]
-  read: IOPS=281k, BW=1099MiB/s (1153MB/s)(26.4GiB/24548msec)
-    slat (nsec): min=1057, max=1218.6M, avg=2390.83, stdev=463612.60
-    clat (usec): min=104, max=1219.3k, avg=451.90, stdev=5225.96
-     lat (usec): min=106, max=1219.3k, avg=454.29, stdev=5246.50
-    clat percentiles (usec):
-     |  1.00th=[  371],  5.00th=[  375], 10.00th=[  379], 20.00th=[  383],
-     | 30.00th=[  388], 40.00th=[  392], 50.00th=[  400], 60.00th=[  420],
-     | 70.00th=[  433], 80.00th=[  445], 90.00th=[  490], 95.00th=[  570],
-     | 99.00th=[  832], 99.50th=[  881], 99.90th=[ 1090], 99.95th=[ 1336],
-     | 99.99th=[ 2769]
-   bw (  MiB/s): min=   61, max= 1274, per=100.00%, avg=1135.93, stdev=185.46, samples=47
-   iops        : min=15870, max=326358, avg=290799.09, stdev=47476.83, samples=47
-  lat (usec)   : 250=0.01%, 500=91.12%, 750=6.69%, 1000=2.02%
-  lat (msec)   : 2=0.12%, 4=0.05%, 2000=0.01%
-  cpu          : usr=30.31%, sys=69.33%, ctx=819, majf=0, minf=36
-  IO depths    : 1=0.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=100.0%
-     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
-     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
-     issued rwts: total=6908727,0,0,0 short=0,0,0,0 dropped=0,0,0,0
-     latency   : target=0, window=0, percentile=100.00%, depth=128
-4k_randwrite_iops: (groupid=1, jobs=1): err= 0: pid=11327: Tue Sep 30 22:14:21 2025
-  Description  : [Max Random Write IOPS]
-  write: IOPS=220k, BW=858MiB/s (900MB/s)(27.1GiB/32273msec); 0 zone resets
-    slat (nsec): min=1259, max=2126.2k, avg=2916.04, stdev=1729.83
-    clat (usec): min=17, max=8825, avg=578.82, stdev=127.60
-     lat (usec): min=21, max=8826, avg=581.74, stdev=127.77
-    clat percentiles (usec):
-     |  1.00th=[  469],  5.00th=[  482], 10.00th=[  494], 20.00th=[  510],
-     | 30.00th=[  537], 40.00th=[  553], 50.00th=[  570], 60.00th=[  578],
-     | 70.00th=[  594], 80.00th=[  611], 90.00th=[  652], 95.00th=[  717],
-     | 99.00th=[  955], 99.50th=[ 1037], 99.90th=[ 2474], 99.95th=[ 2704],
-     | 99.99th=[ 3851]
-   bw (  KiB/s): min=668913, max=1047656, per=100.00%, avg=879435.36, stdev=81083.25, samples=64
-   iops        : min=167228, max=261914, avg=219858.73, stdev=20270.86, samples=64
-  lat (usec)   : 20=0.01%, 50=0.01%, 100=0.01%, 250=0.01%, 500=14.39%
-  lat (usec)   : 750=81.56%, 1000=3.36%
-  lat (msec)   : 2=0.56%, 4=0.13%, 10=0.01%
-  cpu          : usr=36.66%, sys=62.68%, ctx=812, majf=0, minf=37
-  IO depths    : 1=0.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=100.0%
-     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
-     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.1%
-     issued rwts: total=0,7091913,0,0 short=0,0,0,0 dropped=0,0,0,0
-     latency   : target=0, window=0, percentile=100.00%, depth=128
-4k_randread_latency: (groupid=2, jobs=1): err= 0: pid=11569: Tue Sep 30 22:14:21 2025
-  Description  : [Random Read Latency (QD=1)]
-  read: IOPS=11.6k, BW=45.3MiB/s (47.5MB/s)(2716MiB/60001msec)
-    slat (nsec): min=1637, max=402450, avg=7773.39, stdev=5121.78
-    clat (nsec): min=1065, max=6146.4k, avg=76364.63, stdev=42156.04
-     lat (usec): min=45, max=6157, avg=84.14, stdev=43.56
-    clat percentiles (usec):
-     |  1.00th=[   46],  5.00th=[   53], 10.00th=[   61], 20.00th=[   63],
-     | 30.00th=[   67], 40.00th=[   74], 50.00th=[   77], 60.00th=[   79],
-     | 70.00th=[   80], 80.00th=[   88], 90.00th=[   92], 95.00th=[   97],
-     | 99.00th=[  133], 99.50th=[  161], 99.90th=[  198], 99.95th=[  338],
-     | 99.99th=[ 2343]
-   bw (  KiB/s): min=40713, max=55735, per=100.00%, avg=46399.96, stdev=3297.91, samples=120
-   iops        : min=10178, max=13933, avg=11599.81, stdev=824.44, samples=120
-  lat (usec)   : 2=0.01%, 4=0.01%, 10=0.01%, 20=0.01%, 50=3.56%
-  lat (usec)   : 100=92.51%, 250=3.85%, 500=0.04%, 750=0.01%, 1000=0.01%
-  lat (msec)   : 2=0.01%, 4=0.02%, 10=0.01%
-  cpu          : usr=7.43%, sys=19.22%, ctx=695424, majf=0, minf=37
-  IO depths    : 1=100.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=0.0%
-     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
-     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
-     issued rwts: total=695336,0,0,0 short=0,0,0,0 dropped=0,0,0,0
-     latency   : target=0, window=0, percentile=100.00%, depth=1
-1m_seqread_throughput: (groupid=3, jobs=1): err= 0: pid=11914: Tue Sep 30 22:14:21 2025
-  Description  : [Max Sequential Read Throughput]
-  read: IOPS=1749, BW=1754MiB/s (1840MB/s)(23.4GiB/13679msec)
-    slat (usec): min=36, max=2806, avg=143.49, stdev=93.70
-    clat (msec): min=13, max=111, avg=36.37, stdev=11.15
-     lat (msec): min=14, max=112, avg=36.51, stdev=11.14
-    clat percentiles (usec):
-     |  1.00th=[16909],  5.00th=[21365], 10.00th=[25560], 20.00th=[27657],
-     | 30.00th=[28967], 40.00th=[31327], 50.00th=[34341], 60.00th=[38011],
-     | 70.00th=[40633], 80.00th=[44303], 90.00th=[51119], 95.00th=[57410],
-     | 99.00th=[70779], 99.50th=[74974], 99.90th=[84411], 99.95th=[94897],
-     | 99.99th=[98042]
-   bw (  MiB/s): min= 1420, max= 1916, per=100.00%, avg=1756.87, stdev=107.03, samples=27
-   iops        : min= 1420, max= 1916, avg=1756.67, stdev=106.94, samples=27
-  lat (msec)   : 20=3.65%, 50=85.28%, 100=11.32%, 250=0.01%
-  cpu          : usr=0.90%, sys=27.95%, ctx=20512, majf=0, minf=36
-  IO depths    : 1=0.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=100.0%
-     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
-     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
-     issued rwts: total=23936,0,0,0 short=0,0,0,0 dropped=0,0,0,0
-     latency   : target=0, window=0, percentile=100.00%, depth=64
-1m_seqwrite_throughput: (groupid=4, jobs=1): err= 0: pid=12056: Tue Sep 30 22:14:21 2025
-  Description  : [Max Sequential Write Throughput]
-  write: IOPS=1074, BW=1077MiB/s (1130MB/s)(26.0GiB/24723msec); 0 zone resets
-    slat (usec): min=60, max=1901, avg=239.34, stdev=121.94
-    clat (msec): min=23, max=198, avg=59.23, stdev=19.22
-     lat (msec): min=23, max=198, avg=59.47, stdev=19.21
-    clat percentiles (msec):
-     |  1.00th=[   29],  5.00th=[   34], 10.00th=[   40], 20.00th=[   50],
-     | 30.00th=[   52], 40.00th=[   53], 50.00th=[   55], 60.00th=[   57],
-     | 70.00th=[   62], 80.00th=[   70], 90.00th=[   85], 95.00th=[  100],
-     | 99.00th=[  129], 99.50th=[  138], 99.90th=[  155], 99.95th=[  165],
-     | 99.99th=[  194]
-   bw (  MiB/s): min=  640, max= 1246, per=99.87%, avg=1075.83, stdev=192.03, samples=49
-   iops        : min=  640, max= 1246, avg=1075.67, stdev=192.03, samples=49
-  lat (msec)   : 50=22.29%, 100=73.25%, 250=4.69%
-  cpu          : usr=8.34%, sys=20.89%, ctx=24110, majf=0, minf=36
-  IO depths    : 1=0.0%, 2=0.0%, 4=0.0%, 8=0.0%, 16=0.0%, 32=0.0%, >=64=100.0%
-     submit    : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.0%, >=64=0.0%
-     complete  : 0=0.0%, 4=100.0%, 8=0.0%, 16=0.0%, 32=0.0%, 64=0.1%, >=64=0.0%
-     issued rwts: total=0,26570,0,0 short=0,0,0,0 dropped=0,0,0,0
-     latency   : target=0, window=0, percentile=100.00%, depth=64
-
-Run status group 0 (all jobs):
-   READ: bw=1099MiB/s (1153MB/s), 1099MiB/s-1099MiB/s (1153MB/s-1153MB/s), io=26.4GiB (28.3GB), run=24548-24548msec
-
-Run status group 1 (all jobs):
-  WRITE: bw=858MiB/s (900MB/s), 858MiB/s-858MiB/s (900MB/s-900MB/s), io=27.1GiB (29.0GB), run=32273-32273msec
-
-Run status group 2 (all jobs):
-   READ: bw=45.3MiB/s (47.5MB/s), 45.3MiB/s-45.3MiB/s (47.5MB/s-47.5MB/s), io=2716MiB (2848MB), run=60001-60001msec
-
-Run status group 3 (all jobs):
-   READ: bw=1754MiB/s (1840MB/s), 1754MiB/s-1754MiB/s (1840MB/s-1840MB/s), io=23.4GiB (25.2GB), run=13679-13679msec
-
-Run status group 4 (all jobs):
-  WRITE: bw=1077MiB/s (1130MB/s), 1077MiB/s-1077MiB/s (1130MB/s-1130MB/s), io=26.0GiB (27.9GB), run=24723-24723msec
-
-Disk stats (read/write):
-  nvme0n1: ios=9404684/8649319, sectors=140252848/133679360, merge=0/808, ticks=8968386/15020634, in_queue=23989712, util=85.19%
-"""
-
-    parsed_results = parse_fio_output(fio_output)
-    for test, metrics in parsed_results.items():
-        print(f"Test: {test}")
-        for metric, value in metrics.items():
-            print(f"  {metric}: {value}")
-        print()
-    # The parsed_results dictionary now contains the extracted metrics
-    print("Disk stats (read/write):")
-    disk_stats = re.search(r'Disk stats \(read/write\):\n(.*)', fio_output, re.DOTALL)
-    if disk_stats:
-        print(disk_stats.group(0))
+    main()
