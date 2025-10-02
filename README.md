@@ -9,9 +9,9 @@ Each project's lab report is available in both **PDF** and **Markdown** formats 
         * `Project1/Project1_report.pdf`
         * `Project2/Project2_report.pdf`
         * `Project3/Project3_report.pdf`
-* **Source:** The original report files are in **Markdown** format:
-    * `Project1/Project1_report.md`
-    * `Project2/Project2_report.md`
-    * `Project3/Project3_report.md`
+* **Source:** The original report files are now named **README.md** for better visibility on GitHub:
+    * `Project1/README.md`
+    * `Project2/README.md`
+    * `Project3/README.md`
 
 Both formats are kept up to date for reference.
