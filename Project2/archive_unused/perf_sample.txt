@@ -1,0 +1,2 @@
+stat: invalid option -- 'x'
+Try 'stat --help' for more information.
