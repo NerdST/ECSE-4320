@@ -2,11 +2,16 @@
 
 ## Project Reports Location
 
-The lab reports for each project are located in their respective main project directories.
+Each project's lab report is available in both **PDF** and **Markdown** formats in its main directory.
 
-* **Format:** The primary report files are in **Markdown** format, following the naming convention:
+* **Recommended:** Use the **PDF** version for viewing and submission, as it is the finalized format.
+    * Example PDF files:
+        * `Project1/Project1_report.pdf`
+        * `Project2/Project2_report.pdf`
+        * `Project3/Project3_report.pdf`
+* **Source:** The original report files are in **Markdown** format:
     * `Project1/Project1_report.md`
     * `Project2/Project2_report.md`
     * `Project3/Project3_report.md`
- 
-These Markdown files will be converted into corresponding **PDF** files (e.g., `Project1_report.pdf`) for final submission.
+
+Both formats are kept up to date for reference.
