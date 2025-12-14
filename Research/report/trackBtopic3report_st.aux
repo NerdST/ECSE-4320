@@ -1,0 +1,105 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{Schall2019}
+\citation{Saxena2021}
+\citation{Tiramisu}
+\citation{Tiramisu}
+\citation{Jaluta}
+\citation{Arachne}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Literature Review}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Memory Tiering and CXL Technologies}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Heterogeneous Memory Systems}{2}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{CXL and Far-Memory}{2}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Machine Learning-Driven Tiering}{2}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Concurrent Data Structures}{2}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Lock-Free and Wait-Free Designs}{2}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{NUMA-Aware Synchronization}{2}{section*.5}\protected@file@percent }
+\citation{WiredTiger}
+\citation{RocksDB}
+\citation{AutoNUMA}
+\citation{Carrefour}
+\@writefile{toc}{\contentsline {paragraph}{Persistent Data Structures}{3}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Compression in Memory and Storage Systems}{3}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Storage-Level Compression}{3}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Main-Memory Compression}{3}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Memory Migration and Consistency Protocols}{3}{subsection.2.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Page-Level Migration}{3}{section*.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Consistency Guarantees}{3}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.5}Research Gap and Contributions}{3}{subsection.2.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Design and Architecture}{3}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Problem Statement}{4}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Tier Model}{4}{subsection.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Concurrent Data Structures}{5}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.3.1}TieredHashMap}{5}{subsubsection.3.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.3.2}TieredBTree}{5}{subsubsection.3.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Placement Policy}{5}{subsection.3.4}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces HotWarmCold Placement Policy}}{5}{algorithm.1}\protected@file@percent }
+\newlabel{alg:hwc}{{1}{5}{Placement Policy}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Implementation and Simulation Methodology}{5}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Simulator Architecture}{5}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Latency Simulation}{6}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Correctness Validation}{6}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Quantitative Analysis and Results}{6}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Primary Performance Metrics}{6}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {5.1.1}Latency Distribution Analysis}{6}{subsubsection.5.1.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces p99 Latency (ms) across workloads. Tiered vs.\ baseline DRAM-only.}}{6}{table.1}\protected@file@percent }
+\newlabel{tab:latency}{{1}{6}{p99 Latency (ms) across workloads. Tiered vs.\ baseline DRAM-only}{table.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{Insight 1: Tier Placement Dominates Performance}{6}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Insight 1: Tier Placement Dominates Performance}{6}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Insight 2: Compression Enables New Trade-Off Space}{7}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Insight 3: Read-Heavy Workloads Benefit Most}{7}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Discussion and Lessons Learned}{7}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Design Decisions and Rationale}{7}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Sequential Workload:}{7}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Random Workload:}{7}{section*.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hotspot Workload:}{7}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Limitations and Future Work}{8}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Threats to Validity}{8}{subsection.6.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Internal Validity:}{8}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{External Validity:}{8}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Construct Validity:}{8}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Summary of Contributions}{8}{subsection.6.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Broader Impact}{9}{subsection.6.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.6}Future Research Directions}{9}{subsection.6.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hardware Integration:}{9}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Lock-Free Variants:}{9}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Advanced Placement Policies:}{9}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Workload Realism:}{9}{section*.24}\protected@file@percent }
+\citation{Tiramisu}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.7}Concluding Remarks}{10}{subsection.6.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Comparison with OS-Level Page Migration:}{10}{section*.25}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.8}Key Insights}{10}{subsection.6.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.9}Background Migration}{10}{subsection.6.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Methodology and Evaluation}{10}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Workloads}{10}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Metrics}{11}{subsection.7.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Experimental Setup}{11}{subsection.7.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Results}{11}{section.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.1}Latency Analysis}{11}{subsection.8.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces p99 Latency (ms) across workloads. Tiered vs.\ baseline DRAM-only.}}{11}{table.2}\protected@file@percent }
+\newlabel{tab:latency}{{2}{11}{p99 Latency (ms) across workloads. Tiered vs.\ baseline DRAM-only}{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.2}Key Observations}{11}{subsection.8.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {8.3}Validation}{12}{subsection.8.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {9}Analysis and Lessons Learned}{12}{section.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.1}Design Decisions}{12}{subsection.9.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.2}Limitations and Future Work}{12}{subsection.9.2}\protected@file@percent }
+\bibcite{Schall2019}{1}
+\bibcite{Saxena2021}{2}
+\bibcite{Tiramisu}{3}
+\bibcite{Jaluta}{4}
+\bibcite{Arachne}{5}
+\bibcite{WiredTiger}{6}
+\bibcite{RocksDB}{7}
+\bibcite{AutoNUMA}{8}
+\bibcite{Carrefour}{9}
+\@writefile{toc}{\contentsline {subsection}{\numberline {9.3}Insights}{13}{subsection.9.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Conclusion}{13}{section.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}References}{13}{section.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Implementation Details}{14}{appendix.A}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Simulator Entry Point}{14}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Directory Structure}{14}{subsection.A.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {B}Benchmark Output}{14}{appendix.B}\protected@file@percent }
+\gdef \@abspage@last{14}
