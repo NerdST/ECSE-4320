@@ -1,6 +1,6 @@
 # ECSE-4320 Course Projects
 
-## Project Reports Location
+## 1st Three Project Reports Location
 
 Each project's lab report is available in both **PDF** and **Markdown** formats in its main directory.
 
@@ -15,3 +15,7 @@ Each project's lab report is available in both **PDF** and **Markdown** formats 
     * `Project3/README.md`
 
 Both formats are kept up to date for reference.
+
+## Track B Topic 3 Research Project
+* `Research/README.md`
+* `Research/report/trackBtopic3report_st.pdf`
